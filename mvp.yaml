@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  AMIImageID:
+    Description:
+      The AMI Image you wish to deploy (defaults to the latest Amazon Linux 2).
+    Type: AWS::EC2::Image::Id
+    # Default: ami-0f96495a064477ffb #standard Amzn lnx 2
+    # Default: ami-0b128fe99f8141a44 # RHEL CIS hardened
+    Default: ami-02e64b97555b16782 # Amazon Linux 2 CIS hardened
+  EC2InstanceType:
+    Description:
+      The EC2 instance type you wish to deploy.
+    AllowedValues:
+      - t2.micro
+      - t2.small
+    ConstraintDescription: Choose an instance type (t2.micro or t2.small).
+    Default: t2.micro
+    Type: String
+  KeyPairName:
+    ConstraintDescription: Must be an existing EC2 Keypair.
+    Description: >-
+      Name of an existing EC2 KeyPair to enable SSH access to the instances. Use 'ec2-user'
+      for the ssh connection to the ESB instances.
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    Default: test-key
+  ScriptBucket:
+    Description:
+      The S3 bucket containing inital configuration script
+    Type: String
+    Default: test
+
+Resources:
+  WebServerSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: >-
+        Enable HTTP access via port 80 locked down to the load balancer + SSH
+        access
+      VpcId: vpc-0011223344aabbcc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+  WebServer:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !Ref AMIImageID
+      InstanceType: !Ref EC2InstanceType
+      IamInstanceProfile: TESTIDERole
+      KeyName: !Ref KeyPairName
+      Tags:
+        - Key: Name
+          Value: test-stack
+      SubnetId: subnet-aabbccdd001122
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      UserData: !Base64 
+        'Fn::Sub': |-
+          #!/bin/bash -xe
+
+          ## run the hardening script from s3
+          aws s3 cp s3://TEST-bucket/test/hardening_setup.sh /tmp/
+          source /tmp/hardening_setup.sh
+
+          # setup test app
+          yum update -y
+          yum install -y httpd
+          service httpd start  
+          echo "<html><h1>Hello from CloudFormation!</h1></html>" > /var/www/html/test.html
+Outputs:
+  WebsiteURL:
+    Value: !Join 
+      - ''
+      - - 'http://'
+        - !GetAtt 
+          - WebServer
+          - PrivateDnsName
+        - /test.html
+    Description: test Website
